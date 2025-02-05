@@ -31,10 +31,7 @@ use crate::transport::WebsocketTransport;
 use crate::constants::{run_control_chan_backoff, UDP_BUFFER_SIZE, UDP_SENDQ_SIZE, UDP_TIMEOUT};
 
 // The entrypoint of running a client
-pub async fn run_client(
-    config: Config,
-    shutdown_rx: broadcast::Receiver<bool>
-) -> Result<()> {
+pub async fn run_client(config: Config, shutdown_rx: broadcast::Receiver<bool>) -> Result<()> {
     let config = config.client.ok_or_else(|| {
         anyhow!(
         "Try to run as a client, but the configuration is missing. Please add the `[client]` block"
@@ -99,10 +96,7 @@ impl<T: 'static + Transport> Client<T> {
     }
 
     // The entrypoint of Client
-    async fn run(
-        &mut self,
-        mut shutdown_rx: broadcast::Receiver<bool>
-    ) -> Result<()> {
+    async fn run(&mut self, mut shutdown_rx: broadcast::Receiver<bool>) -> Result<()> {
         for (name, config) in &self.config.services {
             // Create a control channel for each service defined
             let handle = ControlChannelHandle::new(
@@ -115,23 +109,10 @@ impl<T: 'static + Transport> Client<T> {
         }
 
         // Wait for the shutdown signal
-        loop {
-            tokio::select! {
-                val = shutdown_rx.recv() => {
-                    match val {
-                        Ok(_) => {}
-                        Err(err) => {
-                            error!("Unable to listen for shutdown signal: {}", err);
-                        }
-                    }
-                    break;
-                },
+        if shutdown_rx.recv().await.is_ok() {
+            for (_, handle) in self.service_handles.drain() {
+                handle.shutdown();
             }
-        }
-
-        // Shutdown all services
-        for (_, handle) in self.service_handles.drain() {
-            handle.shutdown();
         }
 
         Ok(())

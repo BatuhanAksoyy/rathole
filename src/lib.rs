@@ -59,7 +59,7 @@ fn genkey(curve: Option<KeypairType>) -> Result<()> {
     crate::helper::feature_not_compile("nosie")
 }
 
-pub async fn run(args: Cli) -> Result<()> {
+pub async fn run(args: Cli, shutdown_rx: broadcast::Receiver<bool>) -> Result<()> {
     if args.genkey.is_some() {
         return genkey(args.genkey.unwrap());
     }
@@ -69,16 +69,12 @@ pub async fn run(args: Cli) -> Result<()> {
 
     // Spawn a config watcher. The watcher will send a initial signal to start the instance with a config
 
-    // shutdown_tx owns the instance
-    let (shutdown_tx, _) = broadcast::channel(1);
-
     tokio::spawn(run_instance(
         args.config.clone().unwrap(),
         args.clone(),
-        shutdown_tx.subscribe(),
+        shutdown_rx
     ));
 
-    shutdown_tx.subscribe().recv().await?;
     //let _ = shutdown_tx.send(true);
 
     Ok(())
