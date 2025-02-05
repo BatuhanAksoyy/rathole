@@ -109,9 +109,12 @@ impl<T: 'static + Transport> Client<T> {
         }
 
         // Wait for the shutdown signal
-        if shutdown_rx.recv().await.is_ok() {
+        loop {
+            if shutdown_rx.recv().await.is_ok() {
             for (_, handle) in self.service_handles.drain() {
                 handle.shutdown();
+            }
+                break;
             }
         }
 
