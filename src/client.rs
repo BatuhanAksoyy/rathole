@@ -33,8 +33,7 @@ use crate::constants::{run_control_chan_backoff, UDP_BUFFER_SIZE, UDP_SENDQ_SIZE
 // The entrypoint of running a client
 pub async fn run_client(
     config: Config,
-    shutdown_rx: broadcast::Receiver<bool>,
-    update_rx: mpsc::Receiver<ConfigChange>,
+    shutdown_rx: broadcast::Receiver<bool>
 ) -> Result<()> {
     let config = config.client.ok_or_else(|| {
         anyhow!(
@@ -45,13 +44,13 @@ pub async fn run_client(
     match config.transport.transport_type {
         TransportType::Tcp => {
             let mut client = Client::<TcpTransport>::from(config).await?;
-            client.run(shutdown_rx, update_rx).await
+            client.run(shutdown_rx).await
         }
         TransportType::Tls => {
             #[cfg(any(feature = "native-tls", feature = "rustls"))]
             {
                 let mut client = Client::<TlsTransport>::from(config).await?;
-                client.run(shutdown_rx, update_rx).await
+                client.run(shutdown_rx).await
             }
             #[cfg(not(any(feature = "native-tls", feature = "rustls")))]
             crate::helper::feature_neither_compile("native-tls", "rustls")
@@ -60,7 +59,7 @@ pub async fn run_client(
             #[cfg(feature = "noise")]
             {
                 let mut client = Client::<NoiseTransport>::from(config).await?;
-                client.run(shutdown_rx, update_rx).await
+                client.run(shutdown_rx).await
             }
             #[cfg(not(feature = "noise"))]
             crate::helper::feature_not_compile("noise")
@@ -69,7 +68,7 @@ pub async fn run_client(
             #[cfg(any(feature = "websocket-native-tls", feature = "websocket-rustls"))]
             {
                 let mut client = Client::<WebsocketTransport>::from(config).await?;
-                client.run(shutdown_rx, update_rx).await
+                client.run(shutdown_rx).await
             }
             #[cfg(not(any(feature = "websocket-native-tls", feature = "websocket-rustls")))]
             crate::helper::feature_neither_compile("websocket-native-tls", "websocket-rustls")
@@ -102,8 +101,7 @@ impl<T: 'static + Transport> Client<T> {
     // The entrypoint of Client
     async fn run(
         &mut self,
-        mut shutdown_rx: broadcast::Receiver<bool>,
-        mut update_rx: mpsc::Receiver<ConfigChange>,
+        mut shutdown_rx: broadcast::Receiver<bool>
     ) -> Result<()> {
         for (name, config) in &self.config.services {
             // Create a control channel for each service defined
@@ -128,11 +126,6 @@ impl<T: 'static + Transport> Client<T> {
                     }
                     break;
                 },
-                e = update_rx.recv() => {
-                    if let Some(e) = e {
-                        self.handle_hot_reload(e).await;
-                    }
-                }
             }
         }
 
