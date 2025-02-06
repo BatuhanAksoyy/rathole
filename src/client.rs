@@ -77,10 +77,10 @@ type ServiceDigest = protocol::Digest;
 type Nonce = protocol::Digest;
 
 // Holds the state of a client
-struct Client<T: Transport> {
-    config: ClientConfig,
-    service_handles: HashMap<String, ControlChannelHandle>,
-    transport: Arc<T>,
+pub struct Client<T: Transport> {
+    pub config: ClientConfig,
+    pub service_handles: HashMap<String, ControlChannelHandle>,
+    pub transport: Arc<T>,
 }
 
 impl<T: 'static + Transport> Client<T> {
@@ -375,7 +375,7 @@ struct ControlChannel<T: Transport> {
 
 // Handle of a control channel
 // Dropping it will also drop the actual control channel
-struct ControlChannelHandle {
+pub struct ControlChannelHandle {
     shutdown_tx: oneshot::Sender<u8>,
 }
 

@@ -92,16 +92,16 @@ pub async fn run_server(
 type ControlChannelMap<T> = MultiMap<ServiceDigest, Nonce, ControlChannelHandle<T>>;
 
 // Server holds all states of running a server
-struct Server<T: Transport> {
+pub struct Server<T: Transport> {
     // `[server]` config
-    config: Arc<ServerConfig>,
+    pub config: Arc<ServerConfig>,
 
     // `[server.services]` config, indexed by ServiceDigest
-    services: Arc<RwLock<HashMap<ServiceDigest, ServerServiceConfig>>>,
+    pub services: Arc<RwLock<HashMap<ServiceDigest, ServerServiceConfig>>>,
     // Collection of contorl channels
-    control_channels: Arc<RwLock<ControlChannelMap<T>>>,
+    pub control_channels: Arc<RwLock<ControlChannelMap<T>>>,
     // Wrapper around the transport layer
-    transport: Arc<T>,
+    pub transport: Arc<T>,
 }
 
 // Generate a hash map of services which is indexed by ServiceDigest
