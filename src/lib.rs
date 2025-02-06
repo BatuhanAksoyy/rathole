@@ -17,12 +17,12 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info};
 
 #[cfg(feature = "client")]
-mod client;
+pub mod client;
 #[cfg(feature = "client")]
 use client::run_client;
 
 #[cfg(feature = "server")]
-mod server;
+pub mod server;
 #[cfg(feature = "server")]
 use server::run_server;
 
