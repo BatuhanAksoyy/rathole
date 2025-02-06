@@ -215,7 +215,7 @@ impl<T: 'static + Transport> Server<T> {
         Ok(())
     }
 
-    async fn handle_hot_reload(&mut self, e: ConfigChange) {
+    pub async fn server_service_change(&mut self, e: ConfigChange) {
         match e {
             ConfigChange::ServerChange(server_change) => match server_change {
                 ServerServiceChange::Add(cfg) => {

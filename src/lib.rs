@@ -26,8 +26,6 @@ mod server;
 #[cfg(feature = "server")]
 use server::run_server;
 
-use crate::config_watcher::{ConfigChange, ConfigWatcherHandle};
-
 const DEFAULT_CURVE: KeypairType = KeypairType::X25519;
 
 fn get_str_from_keypair_type(curve: KeypairType) -> &'static str {
@@ -59,28 +57,7 @@ fn genkey(curve: Option<KeypairType>) -> Result<()> {
     crate::helper::feature_not_compile("nosie")
 }
 
-pub async fn run(args: Cli, shutdown_rx: broadcast::Receiver<bool>) -> Result<()> {
-    if args.genkey.is_some() {
-        return genkey(args.genkey.unwrap());
-    }
-
-    // Raise `nofile` limit on linux and mac
-    fdlimit::raise_fd_limit();
-
-    // Spawn a config watcher. The watcher will send a initial signal to start the instance with a config
-
-    tokio::spawn(run_instance(
-        args.config.clone().unwrap(),
-        args.clone(),
-        shutdown_rx
-    ));
-
-    //let _ = shutdown_tx.send(true);
-
-    Ok(())
-}
-
-async fn run_instance(
+pub async fn run_instance(
     config: Config,
     args: Cli,
     shutdown_rx: broadcast::Receiver<bool>,

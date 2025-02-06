@@ -121,7 +121,9 @@ impl<T: 'static + Transport> Client<T> {
         Ok(())
     }
 
-    async fn handle_hot_reload(&mut self, e: ConfigChange) {
+
+
+    pub async fn client_service_change(&mut self, e: ConfigChange) {
         match e {
             ConfigChange::ClientChange(client_change) => match client_change {
                 ClientServiceChange::Add(cfg) => {
