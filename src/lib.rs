@@ -5,7 +5,7 @@ pub mod constants;
 pub mod helper;
 pub mod multi_map;
 pub mod protocol;
-mod transport;
+pub mod transport;
 
 pub use cli::Cli;
 use cli::KeypairType;
