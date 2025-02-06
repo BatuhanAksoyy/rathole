@@ -41,7 +41,8 @@ const HANDSHAKE_TIMEOUT: u64 = 5; // Timeout for transport handshake
 // The entrypoint of running a server
 pub async fn run_server(
     config: Config,
-    shutdown_rx: broadcast::Receiver<bool>
+    shutdown_rx: broadcast::Receiver<bool>,
+    update_rx: mpsc::Receiver<ConfigChange>,
 ) -> Result<()> {
     let config = match config.server {
             Some(config) => config,
@@ -53,13 +54,13 @@ pub async fn run_server(
     match config.transport.transport_type {
         TransportType::Tcp => {
             let mut server = Server::<TcpTransport>::from(config).await?;
-            server.run(shutdown_rx).await?;
+            server.run(shutdown_rx, update_rx).await?;
         }
         TransportType::Tls => {
             #[cfg(any(feature = "native-tls", feature = "rustls"))]
             {
                 let mut server = Server::<TlsTransport>::from(config).await?;
-                server.run(shutdown_rx).await?;
+                server.run(shutdown_rx, update_rx).await?;
             }
             #[cfg(not(any(feature = "native-tls", feature = "rustls")))]
             crate::helper::feature_neither_compile("native-tls", "rustls")
@@ -68,7 +69,7 @@ pub async fn run_server(
             #[cfg(feature = "noise")]
             {
                 let mut server = Server::<NoiseTransport>::from(config).await?;
-                server.run(shutdown_rx).await?;
+                server.run(shutdown_rx, update_rx).await?;
             }
             #[cfg(not(feature = "noise"))]
             crate::helper::feature_not_compile("noise")
@@ -77,7 +78,7 @@ pub async fn run_server(
             #[cfg(any(feature = "websocket-native-tls", feature = "websocket-rustls"))]
             {
                 let mut server = Server::<WebsocketTransport>::from(config).await?;
-                server.run(shutdown_rx).await?;
+                server.run(shutdown_rx, update_rx).await?;
             }
             #[cfg(not(any(feature = "websocket-native-tls", feature = "websocket-rustls")))]
             crate::helper::feature_neither_compile("websocket-native-tls", "websocket-rustls")
@@ -133,7 +134,8 @@ impl<T: 'static + Transport> Server<T> {
     // The entry point of Server
     pub async fn run(
         &mut self,
-        mut shutdown_rx: broadcast::Receiver<bool>
+        mut shutdown_rx: broadcast::Receiver<bool>,
+        mut update_rx: mpsc::Receiver<ConfigChange>,
     ) -> Result<()> {
         // Listen at `server.bind_addr`
         let l = self
@@ -200,6 +202,11 @@ impl<T: 'static + Transport> Server<T> {
                                 }
                             }
                         }
+                    }
+                },
+                e = update_rx.recv() => {
+                    if let Some(e) = e {
+                        self.server_service_change(e).await;
                     }
                 },
                 // Wait for the shutdown signal

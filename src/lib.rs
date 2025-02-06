@@ -10,6 +10,7 @@ pub mod transport;
 pub use cli::Cli;
 use cli::KeypairType;
 pub use config::Config;
+use config_watcher::ConfigChange;
 pub use constants::UDP_BUFFER_SIZE;
 
 use anyhow::Result;
@@ -61,6 +62,7 @@ pub async fn run_instance(
     config: Config,
     args: Cli,
     shutdown_rx: broadcast::Receiver<bool>,
+    update_rx: mpsc::Receiver<ConfigChange>
 ) -> Result<()> {
     match determine_run_mode(&config, &args) {
         RunMode::Undetermine => panic!("Cannot determine running as a server or a client"),
@@ -74,7 +76,7 @@ pub async fn run_instance(
             #[cfg(not(feature = "server"))]
             crate::helper::feature_not_compile("server");
             #[cfg(feature = "server")]
-            run_server(config, shutdown_rx).await
+            run_server(config, shutdown_rx, update_rx).await
         }
     }
 }
