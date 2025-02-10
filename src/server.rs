@@ -30,7 +30,7 @@ use crate::transport::TlsTransport;
 #[cfg(any(feature = "websocket-native-tls", feature = "websocket-rustls"))]
 use crate::transport::WebsocketTransport;
 
-type ServiceDigest = protocol::Digest; // SHA256 of a service name
+pub type ServiceDigest = protocol::Digest; // SHA256 of a service name
 type Nonce = protocol::Digest; // Also called `session_key`
 
 const TCP_POOL_SIZE: usize = 8; // The number of cached connections for TCP servies
@@ -43,7 +43,7 @@ pub async fn run_server(
     config: Config,
     shutdown_rx: broadcast::Receiver<bool>,
     update_rx: mpsc::Receiver<ConfigChange>,
-    fields_tx: mpsc::Sender<Fields>,
+    fields_tx: mpsc::Sender<HashMap<ServiceDigest, ServerServiceConfig>>,
 ) -> Result<()> {
     let config = match config.server {
             Some(config) => config,
@@ -106,11 +106,6 @@ pub struct Server<T: Transport> {
     pub transport: Arc<T>,
 }
 
-pub struct Fields {
-    pub config: Arc<ServerConfig>,
-    pub services: HashMap<ServiceDigest, ServerServiceConfig>,
-}
-
 // Generate a hash map of services which is indexed by ServiceDigest
 fn generate_service_hashmap(
     server_config: &ServerConfig,
@@ -142,7 +137,7 @@ impl<T: 'static + Transport> Server<T> {
         &mut self,
         mut shutdown_rx: broadcast::Receiver<bool>,
         mut update_rx: mpsc::Receiver<ConfigChange>,
-        fields_tx: mpsc::Sender<Fields>,
+        fields_tx: mpsc::Sender<HashMap<ServiceDigest, ServerServiceConfig>>,
     ) -> Result<()> {
         // Listen at `server.bind_addr`
         let l = self
@@ -214,10 +209,7 @@ impl<T: 'static + Transport> Server<T> {
                 e = update_rx.recv() => {
                     if let Some(e) = e {
                         self.server_service_change(e).await;
-                        fields_tx.send(Fields {
-                            config: self.config.clone(),
-                            services: self.services.clone().read().await.clone(),
-                        }).await?;
+                        fields_tx.send(self.services.clone().read().await.clone()).await?;
                     }
                 },
                 // Wait for the shutdown signal

@@ -7,14 +7,17 @@ pub mod multi_map;
 pub mod protocol;
 pub mod transport;
 
+use std::collections::HashMap;
+
 pub use cli::Cli;
 use cli::KeypairType;
 pub use config::Config;
+use config::ServerServiceConfig;
 use config_watcher::ConfigChange;
 pub use constants::UDP_BUFFER_SIZE;
 
 use anyhow::Result;
-use server::Fields;
+use server::ServiceDigest;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info};
 
@@ -64,7 +67,7 @@ pub async fn run_instance(
     args: Cli,
     shutdown_rx: broadcast::Receiver<bool>,
     update_rx: mpsc::Receiver<ConfigChange>,
-    fields_tx: mpsc::Sender<Fields>
+    fields_tx: mpsc::Sender<HashMap<ServiceDigest, ServerServiceConfig>>
 ) -> Result<()> {
     match determine_run_mode(&config, &args) {
         RunMode::Undetermine => panic!("Cannot determine running as a server or a client"),
