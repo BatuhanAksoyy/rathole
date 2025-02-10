@@ -108,7 +108,7 @@ pub struct Server<T: Transport> {
 
 pub struct Fields {
     pub config: Arc<ServerConfig>,
-    pub services: Arc<RwLock<HashMap<ServiceDigest, ServerServiceConfig>>>,
+    pub services: HashMap<ServiceDigest, ServerServiceConfig>,
 }
 
 // Generate a hash map of services which is indexed by ServiceDigest
@@ -216,7 +216,7 @@ impl<T: 'static + Transport> Server<T> {
                         self.server_service_change(e).await;
                         fields_tx.send(Fields {
                             config: self.config.clone(),
-                            services: self.services.clone()
+                            services: self.services.clone().read().await.clone(),
                         }).await?;
                     }
                 },
