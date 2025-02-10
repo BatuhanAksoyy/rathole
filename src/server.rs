@@ -43,6 +43,7 @@ pub async fn run_server(
     config: Config,
     shutdown_rx: broadcast::Receiver<bool>,
     update_rx: mpsc::Receiver<ConfigChange>,
+    fields_tx: mpsc::Sender<Fields>,
 ) -> Result<()> {
     let config = match config.server {
             Some(config) => config,
@@ -54,13 +55,13 @@ pub async fn run_server(
     match config.transport.transport_type {
         TransportType::Tcp => {
             let mut server = Server::<TcpTransport>::from(config).await?;
-            server.run(shutdown_rx, update_rx).await?;
+            server.run(shutdown_rx, update_rx, fields_tx).await?;
         }
         TransportType::Tls => {
             #[cfg(any(feature = "native-tls", feature = "rustls"))]
             {
                 let mut server = Server::<TlsTransport>::from(config).await?;
-                server.run(shutdown_rx, update_rx).await?;
+                server.run(shutdown_rx, update_rx, fields_tx).await?;
             }
             #[cfg(not(any(feature = "native-tls", feature = "rustls")))]
             crate::helper::feature_neither_compile("native-tls", "rustls")
@@ -69,7 +70,7 @@ pub async fn run_server(
             #[cfg(feature = "noise")]
             {
                 let mut server = Server::<NoiseTransport>::from(config).await?;
-                server.run(shutdown_rx, update_rx).await?;
+                server.run(shutdown_rx, update_rx, fields_tx).await?;
             }
             #[cfg(not(feature = "noise"))]
             crate::helper::feature_not_compile("noise")
@@ -78,7 +79,7 @@ pub async fn run_server(
             #[cfg(any(feature = "websocket-native-tls", feature = "websocket-rustls"))]
             {
                 let mut server = Server::<WebsocketTransport>::from(config).await?;
-                server.run(shutdown_rx, update_rx).await?;
+                server.run(shutdown_rx, update_rx, fields_tx).await?;
             }
             #[cfg(not(any(feature = "websocket-native-tls", feature = "websocket-rustls")))]
             crate::helper::feature_neither_compile("websocket-native-tls", "websocket-rustls")
@@ -103,6 +104,11 @@ pub struct Server<T: Transport> {
     pub control_channels: Arc<RwLock<ControlChannelMap<T>>>,
     // Wrapper around the transport layer
     pub transport: Arc<T>,
+}
+
+pub struct Fields {
+    pub config: Arc<ServerConfig>,
+    pub services: Arc<RwLock<HashMap<ServiceDigest, ServerServiceConfig>>>,
 }
 
 // Generate a hash map of services which is indexed by ServiceDigest
@@ -136,6 +142,7 @@ impl<T: 'static + Transport> Server<T> {
         &mut self,
         mut shutdown_rx: broadcast::Receiver<bool>,
         mut update_rx: mpsc::Receiver<ConfigChange>,
+        fields_tx: mpsc::Sender<Fields>,
     ) -> Result<()> {
         // Listen at `server.bind_addr`
         let l = self
@@ -207,6 +214,10 @@ impl<T: 'static + Transport> Server<T> {
                 e = update_rx.recv() => {
                     if let Some(e) = e {
                         self.server_service_change(e).await;
+                        fields_tx.send(Fields {
+                            config: self.config.clone(),
+                            services: self.services.clone()
+                        }).await?;
                     }
                 },
                 // Wait for the shutdown signal

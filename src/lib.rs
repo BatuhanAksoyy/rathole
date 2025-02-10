@@ -14,6 +14,7 @@ use config_watcher::ConfigChange;
 pub use constants::UDP_BUFFER_SIZE;
 
 use anyhow::Result;
+use server::Fields;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info};
 
@@ -62,7 +63,8 @@ pub async fn run_instance(
     config: Config,
     args: Cli,
     shutdown_rx: broadcast::Receiver<bool>,
-    update_rx: mpsc::Receiver<ConfigChange>
+    update_rx: mpsc::Receiver<ConfigChange>,
+    fields_tx: mpsc::Sender<Fields>
 ) -> Result<()> {
     match determine_run_mode(&config, &args) {
         RunMode::Undetermine => panic!("Cannot determine running as a server or a client"),
@@ -76,7 +78,7 @@ pub async fn run_instance(
             #[cfg(not(feature = "server"))]
             crate::helper::feature_not_compile("server");
             #[cfg(feature = "server")]
-            run_server(config, shutdown_rx, update_rx).await
+            run_server(config, shutdown_rx, update_rx, fields_tx).await
         }
     }
 }
