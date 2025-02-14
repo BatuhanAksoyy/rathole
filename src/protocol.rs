@@ -206,12 +206,24 @@ pub async fn read_hello<T: AsyncRead + AsyncWrite + Unpin>(conn: &mut T) -> Resu
     Ok(hello)
 }
 
-pub async fn read_auth<T: AsyncRead + AsyncWrite + Unpin>(conn: &mut T) -> Result<Auth> {
-    let mut buf = vec![0u8; PACKET_LEN.auth];
-    conn.read_exact(&mut buf)
-        .await
-        .with_context(|| "Failed to read auth")?;
-    bincode::deserialize(&buf).with_context(|| "Failed to deserialize auth")
+pub async fn read_auth<T: AsyncReadExt + Unpin>(stream: &mut T) -> Result<String> {
+    // İlk olarak, JWT token uzunluğunu belirten bir `u16` değeri okuyalım
+    let mut len_buf = [0u8; 2]; // 2 byte'lık uzunluk bilgisi
+    stream.read_exact(&mut len_buf).await?;
+
+    let msg_len = u16::from_be_bytes(len_buf) as usize; // Big-endian olarak çeviriyoruz
+    if msg_len == 0 || msg_len > 8192 {
+        // JWT'nin mantıklı bir boyutta olup olmadığını kontrol edelim (örneğin max 8KB)
+        bail!("Invalid JWT token length: {}", msg_len);
+    }
+
+    // Belirlenen uzunluk kadar buffer ayırıp token'ı okuyalım
+    let mut buf = vec![0u8; msg_len];
+    stream.read_exact(&mut buf).await?;
+
+    // Token'ı UTF-8 string olarak parse edip döndürelim
+    let token = String::from_utf8(buf)?;
+    Ok(token)
 }
 
 pub async fn read_ack<T: AsyncRead + AsyncWrite + Unpin>(conn: &mut T) -> Result<Ack> {

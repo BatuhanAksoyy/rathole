@@ -13,8 +13,11 @@ use anyhow::{anyhow, bail, Context, Result};
 use backoff::backoff::Backoff;
 use backoff::ExponentialBackoff;
 
+use jsonwebtoken::{decode, DecodingKey, Validation};
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{self, copy_bidirectional, AsyncReadExt, AsyncWriteExt};
@@ -318,26 +321,40 @@ async fn do_control_channel_handshake<T: 'static + Transport>(
     concat.append(&mut nonce);
 
     // Read auth
-    let protocol::Auth(d) = read_auth(&mut conn).await?;
+    let jwt_token = read_auth(&mut conn).await?;
 
-    // Validate
-    let session_key = protocol::digest(&concat);
-    if session_key != d {
-        conn.write_all(&bincode::serialize(&Ack::AuthFailed).unwrap())
-            .await?;
-        debug!(
-            "Expect {}, but got {}",
-            hex::encode(session_key),
-            hex::encode(d)
-        );
-        bail!("Service {} failed the authentication", service_name);
-    } else {
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Claims {
+        pub sub: String,
+        pub exp: i64,
+        pub name: String,
+        pub mail: String,
+        pub user_id: String,
+    }
+
+    let decoding_key = DecodingKey::from_secret(
+        env::var("JWT_SECRET")
+            .expect("JWT_SECRET must be set")
+            .as_bytes(),
+    );
+    let validation = Validation::default();
+
+    let token_data = match decode::<Claims>(&jwt_token, &decoding_key, &validation) {
+        Ok(data) => data,
+        Err(e) => {
+            conn.write_all(&bincode::serialize(&Ack::AuthFailed).unwrap())
+                .await?;
+            bail!(
+                "JWT verification failed for service {}: {}",
+                service_name,
+                e
+            );
+        }
+    };
+    {
         let mut h = control_channels.write().await;
 
-        // If there's already a control channel for the service, then drop the old one.
-        // Because a control channel doesn't report back when it's dead,
-        // the handle in the map could be stall, dropping the old handle enables
-        // the client to reconnect.
+        // Eğer aynı servise ait önceden bir kontrol kanalı varsa, onu kapatıyoruz.
         if h.remove1(&service_digest).is_some() {
             warn!(
                 "Dropping previous control channel for service {}",
@@ -345,16 +362,21 @@ async fn do_control_channel_handshake<T: 'static + Transport>(
             );
         }
 
-        // Send ack
+        // Başarılı doğrulamadan sonra Ack gönderiyoruz.
         conn.write_all(&bincode::serialize(&Ack::Ok).unwrap())
             .await?;
         conn.flush().await?;
 
         info!(service = %service_config.name, "Control channel established");
+
+        // Oturum anahtarı olarak örneğin JWT token’ı veya token içerisindeki jti kullanılabilir.
+        // Burada basitçe JWT token’ını kullanıyoruz.
+        let jwt_clone = jwt_token.clone();
+        let session_key = protocol::digest(jwt_clone.as_bytes());
         let handle =
             ControlChannelHandle::new(conn, service_config, server_config.heartbeat_interval);
 
-        // Insert the new handle
+        // Yeni handle’ı kontrol kanalları haritasına ekliyoruz.
         let _ = h.insert(service_digest, session_key, handle);
     }
 

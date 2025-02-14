@@ -111,17 +111,15 @@ impl<T: 'static + Transport> Client<T> {
         // Wait for the shutdown signal
         loop {
             if shutdown_rx.recv().await.is_ok() {
-            for (_, handle) in self.service_handles.drain() {
-                handle.shutdown();
-            }
+                for (_, handle) in self.service_handles.drain() {
+                    handle.shutdown();
+                }
                 break;
             }
         }
 
         Ok(())
     }
-
-
 
     pub async fn client_service_change(&mut self, e: ConfigChange) {
         match e {
@@ -411,14 +409,10 @@ impl<T: 'static + Transport> ControlChannel<T> {
 
         // Send auth
         debug!("Sending auth");
-        let mut concat = Vec::from(self.service.token.as_ref().unwrap().as_bytes());
-        concat.extend_from_slice(&nonce);
+        let jwt_token = self.service.token.as_ref().unwrap();
+        send_auth(&mut conn, jwt_token).await?;
 
-        let session_key = protocol::digest(&concat);
-        let auth = Auth(session_key);
-        conn.write_all(&bincode::serialize(&auth).unwrap()).await?;
-        conn.flush().await?;
-
+        let session_key = protocol::digest(jwt_token.as_bytes());
         // Read ack
         debug!("Reading ack");
         match read_ack(&mut conn).await? {
@@ -471,6 +465,16 @@ impl<T: 'static + Transport> ControlChannel<T> {
         info!("Control channel shutdown");
         Ok(())
     }
+}
+
+async fn send_auth<T: AsyncWriteExt + Unpin>(stream: &mut T, jwt_token: &str) -> Result<()> {
+    let token_bytes = jwt_token.as_bytes();
+    let len_bytes = (token_bytes.len() as u16).to_be_bytes(); // Uzunluğu 2 byte olarak ekleyelim
+
+    stream.write_all(&len_bytes).await?; // Uzunluk bilgisi
+    stream.write_all(token_bytes).await?; // JWT verisi
+    stream.flush().await?;
+    Ok(())
 }
 
 impl ControlChannelHandle {
