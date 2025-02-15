@@ -13,7 +13,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use backoff::backoff::Backoff;
 use backoff::ExponentialBackoff;
 
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -337,7 +337,7 @@ async fn do_control_channel_handshake<T: 'static + Transport>(
             .expect("JWT_SECRET must be set")
             .as_bytes(),
     );
-    let validation = Validation::default();
+    let validation = Validation::new(env::var("JWT_ALGORITHM")?.parse::<Algorithm>()?);
 
     let token_data = match decode::<Claims>(&jwt_token, &decoding_key, &validation) {
         Ok(data) => data,
