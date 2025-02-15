@@ -167,7 +167,7 @@ async fn run_data_channel<T: Transport>(args: Arc<RunDataChannelArgs<T>>) -> Res
             if args.service.service_type != ServiceType::Tcp {
                 bail!("Expect TCP traffic. Please check the configuration.")
             }
-            run_data_channel_for_tcp::<T>(conn, &env::var("RATHOLE_REDIRECT_URL")?).await?;
+            run_data_channel_for_tcp::<T>(conn, "127.0.0.1:25565").await?;
         }
     }
     Ok(())
