@@ -1,12 +1,11 @@
 use crate::config::{Config, ServerConfig, ServerServiceConfig, ServiceType, TransportType};
 use crate::config_watcher::{ConfigChange, ServerServiceChange};
-use crate::constants::{listen_backoff, UDP_BUFFER_SIZE};
+use crate::constants::listen_backoff;
 use crate::helper::{retry_notify_with_deadline, write_and_flush};
 use crate::multi_map::MultiMap;
 use crate::protocol::Hello::{ControlChannelHello, DataChannelHello};
 use crate::protocol::{
-    self, read_auth, read_hello, Ack, ControlChannelCmd, DataChannelCmd, Hello, UdpTraffic,
-    HASH_WIDTH_IN_BYTES,
+    self, read_auth, read_hello, Ack, ControlChannelCmd, DataChannelCmd, Hello, HASH_WIDTH_IN_BYTES,
 };
 use crate::transport::{SocketOpts, TcpTransport, Transport};
 use anyhow::{anyhow, bail, Context, Result};
@@ -20,24 +19,18 @@ use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{self, copy_bidirectional, AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::io::{self, copy_bidirectional, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::time;
 use tracing::{debug, error, info, info_span, instrument, warn, Instrument, Span};
 
-#[cfg(feature = "noise")]
-use crate::transport::NoiseTransport;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::transport::TlsTransport;
-#[cfg(any(feature = "websocket-native-tls", feature = "websocket-rustls"))]
-use crate::transport::WebsocketTransport;
 
 pub type ServiceDigest = protocol::Digest; // SHA256 of a service name
 type Nonce = protocol::Digest; // Also called `session_key`
 
 const TCP_POOL_SIZE: usize = 8; // The number of cached connections for TCP servies
-const UDP_POOL_SIZE: usize = 2; // The number of cached connections for UDP services
 const CHAN_SIZE: usize = 2048; // The capacity of various chans
 const HANDSHAKE_TIMEOUT: u64 = 5; // Timeout for transport handshake
 
@@ -61,31 +54,8 @@ pub async fn run_server(
             server.run(shutdown_rx, update_rx, fields_tx).await?;
         }
         TransportType::Tls => {
-            #[cfg(any(feature = "native-tls", feature = "rustls"))]
-            {
-                let mut server = Server::<TlsTransport>::from(config).await?;
-                server.run(shutdown_rx, update_rx, fields_tx).await?;
-            }
-            #[cfg(not(any(feature = "native-tls", feature = "rustls")))]
-            crate::helper::feature_neither_compile("native-tls", "rustls")
-        }
-        TransportType::Noise => {
-            #[cfg(feature = "noise")]
-            {
-                let mut server = Server::<NoiseTransport>::from(config).await?;
-                server.run(shutdown_rx, update_rx, fields_tx).await?;
-            }
-            #[cfg(not(feature = "noise"))]
-            crate::helper::feature_not_compile("noise")
-        }
-        TransportType::Websocket => {
-            #[cfg(any(feature = "websocket-native-tls", feature = "websocket-rustls"))]
-            {
-                let mut server = Server::<WebsocketTransport>::from(config).await?;
-                server.run(shutdown_rx, update_rx, fields_tx).await?;
-            }
-            #[cfg(not(any(feature = "websocket-native-tls", feature = "websocket-rustls")))]
-            crate::helper::feature_neither_compile("websocket-native-tls", "websocket-rustls")
+            let mut server = Server::<TlsTransport>::from(config).await?;
+            server.run(shutdown_rx, update_rx, fields_tx).await?;
         }
     }
 
@@ -339,7 +309,7 @@ async fn do_control_channel_handshake<T: 'static + Transport>(
     );
     let validation = Validation::new(env::var("JWT_ALGORITHM")?.parse::<Algorithm>()?);
 
-    let token_data = match decode::<Claims>(&jwt_token, &decoding_key, &validation) {
+    match decode::<Claims>(&jwt_token, &decoding_key, &validation) {
         Ok(data) => data,
         Err(e) => {
             conn.write_all(&bincode::serialize(&Ack::AuthFailed).unwrap())
@@ -351,6 +321,7 @@ async fn do_control_channel_handshake<T: 'static + Transport>(
             );
         }
     };
+
     {
         let mut h = control_channels.write().await;
 
@@ -441,7 +412,6 @@ where
         // Cache some data channels for later use
         let pool_size = match service.service_type {
             ServiceType::Tcp => TCP_POOL_SIZE,
-            ServiceType::Udp => UDP_POOL_SIZE,
         };
 
         for _i in 0..pool_size {
@@ -456,22 +426,6 @@ where
             ServiceType::Tcp => tokio::spawn(
                 async move {
                     if let Err(e) = run_tcp_connection_pool::<T>(
-                        bind_addr,
-                        data_ch_rx,
-                        data_ch_req_tx,
-                        shutdown_rx_clone,
-                    )
-                    .await
-                    .with_context(|| "Failed to run TCP connection pool")
-                    {
-                        error!("{:#}", e);
-                    }
-                }
-                .instrument(Span::current()),
-            ),
-            ServiceType::Udp => tokio::spawn(
-                async move {
-                    if let Err(e) = run_udp_connection_pool::<T>(
                         bind_addr,
                         data_ch_rx,
                         data_ch_req_tx,
@@ -678,62 +632,5 @@ async fn run_tcp_connection_pool<T: Transport>(
     }
 
     info!("Shutdown");
-    Ok(())
-}
-
-#[instrument(skip_all)]
-async fn run_udp_connection_pool<T: Transport>(
-    bind_addr: String,
-    mut data_ch_rx: mpsc::Receiver<T::Stream>,
-    _data_ch_req_tx: mpsc::UnboundedSender<bool>,
-    mut shutdown_rx: broadcast::Receiver<bool>,
-) -> Result<()> {
-    // TODO: Load balance
-
-    let l = retry_notify_with_deadline(
-        listen_backoff(),
-        || async { Ok(UdpSocket::bind(&bind_addr).await?) },
-        |e, duration| {
-            warn!("{:#}. Retry in {:?}", e, duration);
-        },
-        &mut shutdown_rx,
-    )
-    .await
-    .with_context(|| "Failed to listen for the service")?;
-
-    info!("Listening at {}", &bind_addr);
-
-    let cmd = bincode::serialize(&DataChannelCmd::StartForwardUdp).unwrap();
-
-    // Receive one data channel
-    let mut conn = data_ch_rx
-        .recv()
-        .await
-        .ok_or_else(|| anyhow!("No available data channels"))?;
-    write_and_flush(&mut conn, &cmd).await?;
-
-    let mut buf = [0u8; UDP_BUFFER_SIZE];
-    loop {
-        tokio::select! {
-            // Forward inbound traffic to the client
-            val = l.recv_from(&mut buf) => {
-                let (n, from) = val?;
-                UdpTraffic::write_slice(&mut conn, from, &buf[..n]).await?;
-            },
-
-            // Forward outbound traffic from the client to the visitor
-            hdr_len = conn.read_u8() => {
-                let t = UdpTraffic::read(&mut conn, hdr_len?).await?;
-                l.send_to(&t.data, t.from).await?;
-            }
-
-            _ = shutdown_rx.recv() => {
-                break;
-            }
-        }
-    }
-
-    debug!("UDP pool dropped");
-
     Ok(())
 }

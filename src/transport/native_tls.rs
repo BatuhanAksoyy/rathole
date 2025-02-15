@@ -109,8 +109,3 @@ impl Transport for TlsTransport {
             .await?)
     }
 }
-
-#[cfg(feature = "websocket-native-tls")]
-pub(crate) fn get_tcpstream(s: &TlsStream<TcpStream>) -> &TcpStream {
-    s.get_ref().get_ref().get_ref()
-}
